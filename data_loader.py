@@ -96,12 +96,13 @@ class Tokenizer:
 
 
 class TranslationDataset:
-    def __init__(self, dataset, tokenizer, ext=('de', 'en'), batch_size=32, train=True):
+    def __init__(self, dataset, tokenizer, ext=('de', 'en'), max_length=100, batch_size=32, train=True):
         self.dataset = dataset
         self.tokenizer = tokenizer
         self.ext = ext
         self.batch_size = batch_size
-        
+        self.max_length = max_length
+
         # Create Vocabulary
         self.src_vocab, self.trg_vocab = self.get_vocabs()
 
@@ -129,24 +130,21 @@ class TranslationDataset:
     
     def get_src_mask(self, src_tokens, pad_token):
         
-        batch_size = src_tokens.size(0)
-        # masks (B, 1, 1, T)
-        src_mask = (src_tokens != pad_token).view(batch_size, 1, 1, -1)
+        # masks (T)
+        src_mask = (src_tokens != pad_token)
 
         return src_mask
     
     def get_trg_mask(self, trg_tokens, pad_token):
 
-        batch_size = trg_tokens.size(0)
-        sequence_length = trg_tokens.size(-1)
+        sequence_length = trg_tokens.size(0)
         
+        trg_padding_mask = (trg_tokens != pad_token)
+        trg_tri_mask = torch.triu(torch.ones(sequence_length, sequence_length) == 1)
+        trg_tri_mask = trg_tri_mask.transpose(0, 1)
+        trg_mask = trg_padding_mask & trg_tri_mask # (T, T)
 
-        trg_padding_mask = (trg_tokens != pad_token).view(batch_size, 1, 1, -1)
-        trg_tri_mask = torch.triu(torch.ones(batch_size, 1, sequence_length, sequence_length) == 1)
-        trg_tri_mask = trg_tri_mask.transpose(2, 3)
-        trg_mask = trg_padding_mask & trg_tri_mask # (B, 1, T, T)
-
-        return trg_mask # masks (B, 1, 1, T)
+        return trg_mask
 
     def get_masks(self, src_tokens, trg_tokens, pad_token):
         src_mask = self.get_src_mask(src_tokens, pad_token)
@@ -182,14 +180,14 @@ class TranslationDataset:
         EOS = config['SpecialTokens']['EOS_TOKEN']
         trg_tokens = [self.trg_vocab.word2idx[BOS]] + trg_tokens + [self.trg_vocab.word2idx[EOS]]
 
-        src_tokens = torch.tensor(src_tokens).view(1, -1)
-        trg_tokens = torch.tensor(trg_tokens).view(1, -1)
-        
+        src_tokens = torch.tensor(src_tokens)
+        trg_tokens = torch.tensor(trg_tokens)
+          
+        # Shift Target Tokens by 1 
+        trg_tokens = trg_tokens[:-1] # (B, T)
+
         # Create Attention Masks
         src_mask, trg_mask = self.get_masks(src_tokens, trg_tokens, pad_token=0)
-        
-        # Shift Target Tokens by 1 
-        trg_tokens = trg_tokens[:, :-1] # (B, T)
         
         return {
             "src_tokens": src_tokens,
@@ -201,7 +199,7 @@ class TranslationDataset:
         return len(self.dataset)
         
     def __getitem__(self, index):
-        return self.preprocess(self.dataset[index])                          
+        return self.preprocess(self.dataset[index])
     
 
 

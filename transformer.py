@@ -62,9 +62,7 @@ class Transformer(nn.Module):
         # (B, T, d_model) -->  (B, T, vocab_length)
         trg_log_p = self.log_softmax(self.output_linear(trg_embeddings))
 
-        # Reshape For the KL div Loss
-        # (B, T, vocab_length) --> (B*T, vocab_length)
-        return trg_log_p.view(-1, trg_log_p.shape[-1])
+        return trg_log_p
     
         
 class TransformerEncoder(nn.Module):
