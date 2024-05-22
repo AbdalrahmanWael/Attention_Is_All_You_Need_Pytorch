@@ -5,7 +5,7 @@ import os
 from utils.config import config
 
 class Vocabulary:
-    def __init__(self, min_freq=2):
+    def __init__(self, min_freq=3):
         self.PAD = config['SpecialTokens']['PAD_TOKEN']
         self.BOS = config['SpecialTokens']['BOS_TOKEN']
         self.EOS = config['SpecialTokens']['EOS_TOKEN']
@@ -34,7 +34,16 @@ class Vocabulary:
     
     def numerize(self, text):
         return [self.word2idx.get(word, self.word2idx[self.UNK]) for word in text]
-
+    
+    def detokenize(self, tokens):
+        sentence = []
+        for token in tokens:
+            word = self.idx2word[token.item()]
+            if word == config['SpecialTokens']['EOS_TOKEN']:
+                break
+            sentence.append(word)
+        return sentence
+    
     def __len__(self):
         return len(self.word2idx.keys())
     
@@ -94,38 +103,40 @@ class Tokenizer:
 
 
 
-
 class TranslationDataset:
-    def __init__(self, dataset, tokenizer, ext=('de', 'en'), max_length=100, batch_size=32, train=True):
+    def __init__(self, dataset, tokenizer, src_vocab=None, trg_vocab=None, vocab_min_freq=2, ext=('de', 'en'), max_length=100, batch_size=32, train=True):
         self.dataset = dataset
         self.tokenizer = tokenizer
         self.ext = ext
         self.batch_size = batch_size
         self.max_length = max_length
+        self.vocab_min_freq = vocab_min_freq
 
         # Create Vocabulary
-        self.src_vocab, self.trg_vocab = self.get_vocabs()
-
+        if src_vocab is None or trg_vocab is None:
+            self.src_vocab, self.trg_vocab = self.get_vocabs() 
+        else:
+             self.src_vocab, self.trg_vocab = src_vocab, trg_vocab
 
     def get_vocabs(self):
         src_words = []
         trg_words = []
-    
+        
         for sample in self.dataset:
             src_sentence = sample[self.ext[0]]
             trg_sentence = sample[self.ext[1]]
-    
+        
             # Tokenize
             src_sentence_tokens, trg_sentence_tokens = self.tokenizer(src_sentence, trg_sentence)
             src_words.append(src_sentence_tokens)
             trg_words.append(trg_sentence_tokens)
-    
+        
         # Create Vocabulary
-        src_vocab = Vocabulary(min_freq=2)
-        trg_vocab = Vocabulary(min_freq=2)
+        src_vocab = Vocabulary(min_freq=self.vocab_min_freq)
+        trg_vocab = Vocabulary(min_freq=self.vocab_min_freq)
         src_vocab.create_vocab(src_words)
         trg_vocab.create_vocab(trg_words)
-    
+        
         return src_vocab, trg_vocab
     
     def get_src_mask(self, src_tokens, pad_token):
@@ -137,14 +148,16 @@ class TranslationDataset:
     
     def get_trg_mask(self, trg_tokens, pad_token):
 
+        # batch_size = trg_tokens.size(0)
         sequence_length = trg_tokens.size(0)
         
+
         trg_padding_mask = (trg_tokens != pad_token)
         trg_tri_mask = torch.triu(torch.ones(sequence_length, sequence_length) == 1)
         trg_tri_mask = trg_tri_mask.transpose(0, 1)
         trg_mask = trg_padding_mask & trg_tri_mask # (T, T)
 
-        return trg_mask
+        return trg_mask # masks (B, 1, 1 T)
 
     def get_masks(self, src_tokens, trg_tokens, pad_token):
         src_mask = self.get_src_mask(src_tokens, pad_token)
@@ -164,22 +177,24 @@ class TranslationDataset:
         trg_tokens = self.trg_vocab.numerize(trg_tokens)
 
         # Truncate and pad the tokens to the maximum_length
-        src_max_len = self.src_vocab.max_len
-        trg_max_len = self.trg_vocab.max_len
+        src_max_len = self.max_length #self.src_vocab.max_len
+        trg_max_len = self.max_length #self.trg_vocab.max_len
         
-        
-        src_tokens = src_tokens[:src_max_len]
-        trg_tokens = trg_tokens[:trg_max_len]
-        
-        PAD = config['SpecialTokens']['PAD_TOKEN']
-        src_tokens += [self.src_vocab.word2idx[PAD]] * ( src_max_len - len(src_tokens))
-        trg_tokens += [self.trg_vocab.word2idx[PAD]] * ( trg_max_len - len(trg_tokens))
 
         # Add BOS and EOS tokens to the target tokens
         BOS = config['SpecialTokens']['BOS_TOKEN']
         EOS = config['SpecialTokens']['EOS_TOKEN']
         trg_tokens = [self.trg_vocab.word2idx[BOS]] + trg_tokens + [self.trg_vocab.word2idx[EOS]]
 
+        
+        # Padding
+        PAD = config['SpecialTokens']['PAD_TOKEN']
+        src_tokens += [self.src_vocab.word2idx[PAD]] * ( src_max_len - len(src_tokens))
+        trg_tokens += [self.trg_vocab.word2idx[PAD]] * ( trg_max_len - len(trg_tokens))
+
+        src_tokens = src_tokens[:src_max_len]
+        trg_tokens = trg_tokens[:trg_max_len]
+        
         src_tokens = torch.tensor(src_tokens)
         trg_tokens = torch.tensor(trg_tokens)
           
@@ -199,7 +214,7 @@ class TranslationDataset:
         return len(self.dataset)
         
     def __getitem__(self, index):
-        return self.preprocess(self.dataset[index])
+        return self.preprocess(self.dataset[index])                                       
     
 
 
